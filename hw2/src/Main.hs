@@ -4,37 +4,13 @@ import Lex
 import Parser
 import Checker
 import Data.List 
-
 import qualified Data.Map.Strict as Map
-
-readProof = do
-  contents <- getContents
-  let proof = ($!)map (parseExpression . alexScanTokens) (filter  (/=[]) (lines contents))
-  return proof
-
-printProof [] _ = putStr ""
-printProof (expWithType : others) n = do
-  let curExp = fst expWithType
-  let curType = snd expWithType
-  putStrLn $ "[" ++ show n ++ ". " ++ show curType ++ "] " ++ show curExp
-  printProof others (n + 1)
-
-
-printFirstLine [] expr = putStrLn $ "|- " ++ show expr
-printFirstLine (x : xs) expr = do
-  putStr $ show x
-  case (xs) of
-    [] -> putStrLn $! " |- " ++ show expr
-    _ -> do
-      putStr ", " 
-      printFirstLine xs expr
-      
+   
 main = do 
   line <- getLine
   let (asspms, expr) = parseFirstLine $ alexScanTokens line
 
   let assMap = createMap Map.empty (reverse asspms) 1
-  -- let assMap = Map.fromList $ zip (reverse asspms) ([1..(length asspms)])
   
   proof <- readProof
   let res = checkLast expr proof
@@ -48,12 +24,32 @@ main = do
       printFirstLine (reverse asspms) expr
       printProof resultList 1 
     False -> putStrLn "Proof is incorrect"
-  
+
+readProof = do
+  contents <- getContents
+  let proof = ($!)map (parseExpression . alexScanTokens) (filter  (/=[]) (lines contents))
+  return proof
+
+printProof [] _ = putStr ""
+printProof (expWithType : others) n = do
+  let curExp = fst expWithType
+  let curType = snd expWithType
+  putStrLn $ "[" ++ show n ++ ". " ++ show curType ++ "] " ++ show curExp
+  printProof others (n + 1)
+
+printFirstLine [] expr = putStrLn $ "|- " ++ show expr
+printFirstLine (x : xs) expr = do
+  putStr $ show x
+  case (xs) of
+    [] -> putStrLn $! " |- " ++ show expr
+    _ -> do
+      putStr ", " 
+      printFirstLine xs expr
 
 createMap resultMap [] _ = resultMap
 createMap resultMap (x:xs) index = do
   case (Map.lookup x resultMap) of
-    Just _ -> createMap resultMap xs index
+    Just _ -> createMap resultMap xs (index + 1)
     _ -> do
       let newMap = Map.insert x index resultMap
       createMap newMap xs (index + 1)

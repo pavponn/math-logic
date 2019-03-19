@@ -3,15 +3,18 @@ import MyData
 import Data.Maybe
 import qualified Data.Map.Strict as Map
 
-{- берем недоделанный список и делаем из него нормальный
--}
-updateList _  newList []  = newList 
 
-updateList mapOfInd newList (expWithType : others) = do
+checkIfPresent expr myMap =  Map.lookup expr myMap
+
+-- берем недоделанный список и делаем из него нормальный
+
+updateList _  !newList []  = newList 
+
+updateList mapOfInd !newList (expWithType : others) = do
   let curExp = fst expWithType
   let curIndex = fst $ snd expWithType 
   let curType = snd $ snd expWithType
-  case (checkIfIndex curIndex mapOfInd) of
+  case (checkIfPresent curIndex mapOfInd) of
     Just realIndex -> do
       case (curType) of 
         (ModusPonens x y) -> do
@@ -25,22 +28,19 @@ updateList mapOfInd newList (expWithType : others) = do
     Nothing -> updateList mapOfInd newList others
 
 
-{- после расставления зависимостей мы мапим индексы в правильные 
--}
+-- после расставления зависимостей мы мапим индексы в правильные 
 
 mapIndexes mapOfInd [] _ _ = mapOfInd
 
 mapIndexes mapOfInd (x : xs) trueIndex simpleIndex = do
-  case (checkIfIndex simpleIndex mapOfInd) of 
+  case (checkIfPresent simpleIndex mapOfInd) of 
     Just _ -> do
       let newMap = ($!) Map.insert simpleIndex trueIndex mapOfInd
       mapIndexes newMap xs (trueIndex + 1) (simpleIndex + 1)
     Nothing -> mapIndexes mapOfInd xs trueIndex (simpleIndex + 1)
 
+-- расставляем зависимости, которые нужны
 
-
-{- расставляем зависимости, которые нужны
--}
 fillIndMap mapOfInd [] = mapOfInd
 
 fillIndMap mapOfInd (exp : exps) = do
@@ -48,7 +48,7 @@ fillIndMap mapOfInd (exp : exps) = do
   let typeOfExpr = snd $ snd exp
   case (typeOfExpr) of
     (ModusPonens x y) -> do
-      case (checkIfIndex curIndex mapOfInd) of
+      case (checkIfPresent curIndex mapOfInd) of
         Just _ -> do
           let updMap = Map.insert x 0 mapOfInd
           let newMap = ($!) Map.insert y 0 updMap
@@ -58,13 +58,13 @@ fillIndMap mapOfInd (exp : exps) = do
     _ -> fillIndMap mapOfInd exps
 
 
-{- хотим отсеить все повторяющиеся, а также недоказанные выражения
- принимает:
+{- хотим отсеить все повторяющиеся
  -мапу гипотез
  -мапу выражений
- -текущий список правильных выражений
+ -мапу импликаций
  -список оставшихся для проверки выражений
- -текущий индекс "правильного выражения"
+ -текущий индекс выражения без повторов
+ -выражение, которое надо доказать
 -}
 
 filterExpr _ exprMap implMap [] _ _ = (False, exprMap)
@@ -74,7 +74,7 @@ filterExpr assMap exprMap implMap (exp : exps) index expr =
       if (exp == expr) then (True, exprMap) 
         else ($!) filterExpr assMap exprMap implMap exps index expr
     Nothing -> do 
-      case (checkAss exp assMap) of 
+      case (checkIfPresent exp assMap) of 
         Just x -> do
           let newMap = Map.insert exp (index, (Assumption x)) exprMap
           case (exp) of
@@ -96,7 +96,7 @@ filterExpr assMap exprMap implMap (exp : exps) index expr =
                 _ -> if (exp == expr) then checkKukarek newMap assMap newMap implMap exps (index + 1)
                       else ($!) filterExpr assMap newMap implMap exps (index + 1) expr
             Nothing -> do
-              case (checkIfPresentImpl exp implMap) of
+              case (checkIfPresent exp implMap) of
                 Just listForRight -> do
                   case (checkModusPonensNew exprMap listForRight) of
                     Just (index1, index2) -> do
@@ -111,13 +111,19 @@ filterExpr assMap exprMap implMap (exp : exps) index expr =
                     Nothing -> (False, exprMap)
                 Nothing -> (False, exprMap)
 
+{-
+  проверяем доказательство на корректность после того, как нужное утверждениедоказано
+  P.S. да, это практически копипаста функции выше, но мне нужно было, чтобы оно точно работало, 
+  когда-нибудь избавлюсь от неё
+-}
+
 checkKukarek exprMapToReturn _ _ _ [] _ = (True, exprMapToReturn)
 
 checkKukarek exprMapToReturn assMap exprMap implMap (exp : exps) index = 
   case (checkIfPresent exp exprMap) of
     Just _ -> checkKukarek exprMapToReturn assMap exprMap implMap exps index
     Nothing -> do
-      case (checkAss exp assMap) of
+      case (checkIfPresent exp assMap) of
         Just x -> do
           let newMap = ($!) Map.insert exp (index, (Assumption x)) exprMap
           case exp of
@@ -135,7 +141,7 @@ checkKukarek exprMapToReturn assMap exprMap implMap (exp : exps) index =
                  checkKukarek exprMapToReturn assMap newMap newImplMap exps (index + 1)
                _ -> checkKukarek exprMapToReturn assMap newMap implMap exps (index + 1)
            Nothing -> do
-             case (checkIfPresentImpl exp implMap) of
+             case (checkIfPresent exp implMap) of
                Just listForRight -> do
                  case (checkModusPonensNew exprMap listForRight) of
                    Just (index1, index2) -> do
@@ -157,31 +163,9 @@ checkKukarek exprMapToReturn assMap exprMap implMap (exp : exps) index =
 updateMap implMap rightExp leftExp index = do
   case (Map.lookup rightExp implMap) of 
     Just x -> do
-      let newMap = ($!) Map.insert rightExp ( ($) (:) (leftExp, index) x) implMap
-      newMap
+      ($!) Map.insert rightExp ( ($) (:) (leftExp, index) x) implMap
     Nothing -> do
-      let newMap  = ($!) Map.insert rightExp [(leftExp, index)] implMap
-      newMap
-      
-
-{-
-есть ли в мапе нужный индекс
--}
-checkIfIndex ind myMap = Map.lookup ind myMap
-
-
-{- есть ли в мапе доказанных утверждений, возвращает Nothing, если нет или 
-Just ((index, Type)), если есть
--}
-checkIfPresent expr myMap =  Map.lookup expr myMap
-  
-
--- возвращает Nothing, если это не гипотеза, иначе возврашает Just (номер гипотезы)
-checkAss expr assMap = Map.lookup expr assMap
-
---проверяет, было ли такое выражение как правая часть импликации
-
-checkIfPresentImpl expr implMap = Map.lookup expr implMap
+      ($!) Map.insert rightExp [(leftExp, index)] implMap
 
 {- проверка M.P. новая, 
 принимает мапу правильных высказываний, список левых частей для конкретной правой части 
@@ -194,29 +178,6 @@ checkModusPonensNew exprMap (exp : exps) = do
   case (Map.lookup curExp exprMap) of
     Just (indexL, _) -> Just (index, indexL)
     Nothing -> checkModusPonensNew exprMap exps
-
-
-{- проверка на M.P.
- принимает:
- -выражение, которое надо. проверить на то, является ли оно результатом M.P
- -мапу доказанных выражений 
- -список выражений
- -индекс текущего выражения из списка
--}
-checkModusPonens _ _ [] = Nothing 
-
-checkModusPonens expr exprMap (exp : exps) = do
-  let index = fst $ snd exp 
-  case (fst exp) of 
-    (Bin Impl a b) | b == expr -> do
-      case (checkIfPresent a exprMap) of
-        Just ((index2, _)) -> Just (index, index2)
-        Nothing -> checkModusPonens expr exprMap exps 
-    _ -> checkModusPonens expr exprMap exps 
-
-
-
-
 
 -- проверка на аксиомы 
 
